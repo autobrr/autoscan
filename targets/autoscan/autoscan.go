@@ -3,7 +3,7 @@ package autoscan
 import (
 	"github.com/rs/zerolog"
 
-	"github.com/cloudbox/autoscan"
+	"github.com/autobrr/autoscan"
 )
 
 type Config struct {

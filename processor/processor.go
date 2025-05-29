@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cloudbox/autoscan"
-	"github.com/cloudbox/autoscan/migrate"
+	"github.com/autobrr/autoscan"
+	"github.com/autobrr/autoscan/migrate"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -62,7 +62,6 @@ func (p *Processor) CheckAvailability(targets []autoscan.Target) error {
 	g := new(errgroup.Group)
 
 	for _, target := range targets {
-		target := target
 		g.Go(func() error {
 			return target.Available()
 		})
@@ -75,7 +74,6 @@ func (p *Processor) callTargets(targets []autoscan.Target, scan autoscan.Scan) e
 	g := new(errgroup.Group)
 
 	for _, target := range targets {
-		target := target
 		g.Go(func() error {
 			return target.Scan(scan)
 		})
