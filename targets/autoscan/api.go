@@ -1,6 +1,7 @@
 package autoscan
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -18,8 +19,8 @@ type apiClient struct {
 	pass    string
 }
 
-func newAPIClient(baseURL string, user string, pass string, log zerolog.Logger) apiClient {
-	return apiClient{
+func newAPIClient(baseURL string, user string, pass string, log zerolog.Logger) *apiClient {
+	return &apiClient{
 		client:  &http.Client{},
 		log:     log,
 		baseURL: baseURL,
@@ -28,7 +29,7 @@ func newAPIClient(baseURL string, user string, pass string, log zerolog.Logger) 
 	}
 }
 
-func (c apiClient) do(req *http.Request) (*http.Response, error) {
+func (c *apiClient) do(req *http.Request) (*http.Response, error) {
 	res, err := c.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%v: %w", err, autoscan.ErrTargetUnavailable)
@@ -56,9 +57,9 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 	}
 }
 
-func (c apiClient) Available() error {
+func (c *apiClient) Available(ctx context.Context) error {
 	// create request
-	req, err := http.NewRequest("HEAD", autoscan.JoinURL(c.baseURL, "triggers", "manual"), nil)
+	req, err := http.NewRequestWithContext(ctx, "HEAD", autoscan.JoinURL(c.baseURL, "triggers", "manual"), nil)
 	if err != nil {
 		return fmt.Errorf("failed creating head request: %v: %w", err, autoscan.ErrFatal)
 	}
@@ -77,9 +78,9 @@ func (c apiClient) Available() error {
 	return nil
 }
 
-func (c apiClient) Scan(path string) error {
+func (c *apiClient) Scan(ctx context.Context, path string) error {
 	// create request
-	req, err := http.NewRequest("POST", autoscan.JoinURL(c.baseURL, "triggers", "manual"), nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", autoscan.JoinURL(c.baseURL, "triggers", "manual"), nil)
 	if err != nil {
 		return fmt.Errorf("failed creating scan request: %v: %w", err, autoscan.ErrFatal)
 	}

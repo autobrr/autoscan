@@ -15,7 +15,7 @@ func scanStats(proc *processor.Processor, interval time.Duration) {
 	for {
 		select {
 		case _ = <-st.C:
-			// retrieve amount of scans remaining
+			// retrieve number of scans remaining
 			sm, err := proc.ScansRemaining()
 			switch {
 			case err == nil:

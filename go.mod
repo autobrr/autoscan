@@ -17,9 +17,11 @@ require (
 	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/time v0.11.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
-	gopkg.in/yaml.v2 v2.4.0
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 	modernc.org/sqlite v1.37.1
 )
+
+require gopkg.in/yaml.v3 v3.0.1
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

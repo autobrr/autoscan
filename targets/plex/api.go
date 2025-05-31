@@ -1,6 +1,7 @@
 package plex
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -28,7 +29,7 @@ func newAPIClient(baseURL string, token string, log zerolog.Logger) *apiClient {
 	}
 }
 
-func (c apiClient) do(req *http.Request) (*http.Response, error) {
+func (c *apiClient) do(req *http.Request) (*http.Response, error) {
 	req.Header.Set("X-Plex-Token", c.token)
 	req.Header.Set("Accept", "application/json") // Force JSON Response.
 
@@ -59,9 +60,9 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 	}
 }
 
-func (c apiClient) Version() (string, error) {
+func (c *apiClient) Version(ctx context.Context) (string, error) {
 	reqURL := autoscan.JoinURL(c.baseURL)
-	req, err := http.NewRequest("GET", reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed creating version request: %v: %w", err, autoscan.ErrFatal)
 	}
@@ -93,9 +94,9 @@ type library struct {
 	Path string
 }
 
-func (c apiClient) Libraries() ([]library, error) {
+func (c *apiClient) Libraries(ctx context.Context) ([]library, error) {
 	reqURL := autoscan.JoinURL(c.baseURL, "library", "sections")
-	req, err := http.NewRequest("GET", reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed creating libraries request: %v: %w", err, autoscan.ErrFatal)
 	}
@@ -146,9 +147,9 @@ func (c apiClient) Libraries() ([]library, error) {
 	return libraries, nil
 }
 
-func (c apiClient) Scan(path string, libraryID int) error {
+func (c *apiClient) Scan(ctx context.Context, path string, libraryID int) error {
 	reqURL := autoscan.JoinURL(c.baseURL, "library", "sections", strconv.Itoa(libraryID), "refresh")
-	req, err := http.NewRequest("GET", reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed creating scan request: %v: %w", err, autoscan.ErrFatal)
 	}

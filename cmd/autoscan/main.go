@@ -1,77 +1,34 @@
 package main
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alecthomas/kong"
 	"github.com/natefinch/lumberjack"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"gopkg.in/yaml.v2"
 
 	"github.com/autobrr/autoscan"
-	"github.com/autobrr/autoscan/migrate"
+	"github.com/autobrr/autoscan/datastore"
 	"github.com/autobrr/autoscan/processor"
 	ast "github.com/autobrr/autoscan/targets/autoscan"
 	"github.com/autobrr/autoscan/targets/emby"
 	"github.com/autobrr/autoscan/targets/jellyfin"
 	"github.com/autobrr/autoscan/targets/plex"
-	"github.com/autobrr/autoscan/triggers/a_train"
-	"github.com/autobrr/autoscan/triggers/bernard"
 	"github.com/autobrr/autoscan/triggers/inotify"
-	"github.com/autobrr/autoscan/triggers/lidarr"
-	"github.com/autobrr/autoscan/triggers/manual"
-	"github.com/autobrr/autoscan/triggers/radarr"
-	"github.com/autobrr/autoscan/triggers/readarr"
-	"github.com/autobrr/autoscan/triggers/sonarr"
 
 	// sqlite3 driver
 	_ "modernc.org/sqlite"
 )
-
-type config struct {
-	// General configuration
-	Host       []string      `yaml:"host"`
-	Port       int           `yaml:"port"`
-	MinimumAge time.Duration `yaml:"minimum-age"`
-	ScanDelay  time.Duration `yaml:"scan-delay"`
-	ScanStats  time.Duration `yaml:"scan-stats"`
-	Anchors    []string      `yaml:"anchors"`
-
-	// Authentication for autoscan.HTTPTrigger
-	Auth struct {
-		Username string `yaml:"username"`
-		Password string `yaml:"password"`
-	} `yaml:"authentication"`
-
-	// autoscan.HTTPTrigger
-	Triggers struct {
-		Manual  manual.Config    `yaml:"manual"`
-		ATrain  a_train.Config   `yaml:"a-train"`
-		Bernard []bernard.Config `yaml:"bernard"`
-		Inotify []inotify.Config `yaml:"inotify"`
-		Lidarr  []lidarr.Config  `yaml:"lidarr"`
-		Radarr  []radarr.Config  `yaml:"radarr"`
-		Readarr []readarr.Config `yaml:"readarr"`
-		Sonarr  []sonarr.Config  `yaml:"sonarr"`
-	} `yaml:"triggers"`
-
-	// autoscan.Target
-	Targets struct {
-		Autoscan []ast.Config      `yaml:"autoscan"`
-		Emby     []emby.Config     `yaml:"emby"`
-		Jellyfin []jellyfin.Config `yaml:"jellyfin"`
-		Plex     []plex.Config     `yaml:"plex"`
-	} `yaml:"targets"`
-}
 
 var (
 	// release variables
@@ -128,20 +85,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	// logger
-	logger := log.Output(io.MultiWriter(zerolog.ConsoleWriter{
-		TimeFormat: time.Stamp,
-		Out:        os.Stderr,
-	}, zerolog.ConsoleWriter{
-		TimeFormat: time.Stamp,
-		Out: &lumberjack.Logger{
+	logWriters := []io.Writer{zerolog.ConsoleWriter{TimeFormat: time.Stamp, Out: os.Stderr}}
+	if cli.Log != "" {
+		logWriters = append(logWriters, zerolog.ConsoleWriter{TimeFormat: time.Stamp, NoColor: true, Out: &lumberjack.Logger{
 			Filename:   cli.Log,
 			MaxSize:    5,
 			MaxAge:     14,
 			MaxBackups: 5,
-		},
-		NoColor: true,
-	}))
+		}})
+	}
+
+	// logger
+	logger := log.Output(io.MultiWriter(logWriters...))
 
 	switch {
 	case cli.Verbosity == 1:
@@ -152,56 +107,29 @@ func main() {
 		log.Logger = logger.Level(zerolog.InfoLevel)
 	}
 
-	// datastore
-	db, err := sql.Open("sqlite", cli.Database)
-	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed opening datastore")
-	}
-	db.SetMaxOpenConns(1)
-
 	// config
-	file, err := os.Open(cli.Config)
+	c, err := NewConfig(cli.Config)
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed opening config")
-	}
-	defer file.Close()
-
-	// set default values
-	c := config{
-		MinimumAge: 10 * time.Minute,
-		ScanDelay:  5 * time.Second,
-		ScanStats:  1 * time.Hour,
-		Host:       []string{""},
-		Port:       3030,
+		log.Fatal().Err(err).Msg("Failed opening config")
 	}
 
-	decoder := yaml.NewDecoder(file)
-	decoder.SetStrict(true)
-	err = decoder.Decode(&c)
+	// datastore
+	store, err := datastore.NewDatastore(cli.Database)
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed decoding config")
+		log.Fatal().Err(err).Msg("Failed initialising datastore")
 	}
+	defer store.Close()
 
-	// migrator
-	mg, err := migrate.New(db, "migrations")
-	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed initialising migrator")
-	}
+	// targets
+	targets := initTargets(c)
 
 	// processor
 	proc, err := processor.New(processor.Config{
+		Targets:    targets,
 		Anchors:    c.Anchors,
 		MinimumAge: c.MinimumAge,
-		Db:         db,
-		Mg:         mg,
+		ScanDelay:  c.ScanDelay,
+		Datastore:  store,
 	})
 
 	if err != nil {
@@ -221,17 +149,17 @@ func main() {
 	}
 
 	// daemon triggers
-	for _, t := range c.Triggers.Bernard {
-		trigger, err := bernard.New(t, db)
-		if err != nil {
-			log.Fatal().
-				Err(err).
-				Str("trigger", "bernard").
-				Msg("Failed initialising trigger")
-		}
-
-		go trigger(proc.Add)
-	}
+	//for _, t := range c.Triggers.Bernard {
+	//	trigger, err := bernard.New(t, db)
+	//	if err != nil {
+	//		log.Fatal().
+	//			Err(err).
+	//			Str("trigger", "bernard").
+	//			Msg("Failed initialising trigger")
+	//	}
+	//
+	//	go trigger(proc.Add)
+	//}
 
 	for _, t := range c.Triggers.Inotify {
 		trigger, err := inotify.New(t)
@@ -248,23 +176,6 @@ func main() {
 	// http triggers
 	router := getRouter(c, proc)
 
-	for _, h := range c.Host {
-		go func(host string) {
-			addr := host
-			if !strings.Contains(addr, ":") {
-				addr = fmt.Sprintf("%s:%d", host, c.Port)
-			}
-
-			log.Info().Msgf("Starting server on %s", addr)
-			if err := http.ListenAndServe(addr, router); err != nil {
-				log.Fatal().
-					Str("addr", addr).
-					Err(err).
-					Msg("Failed starting web server")
-			}
-		}(h)
-	}
-
 	log.Info().
 		Int("manual", 1).
 		Int("bernard", len(c.Triggers.Bernard)).
@@ -275,17 +186,69 @@ func main() {
 		Int("sonarr", len(c.Triggers.Sonarr)).
 		Msg("Initialised triggers")
 
-	// targets
+	// scan stats
+	if c.ScanStats.Seconds() > 0 {
+		go scanStats(proc, c.ScanStats)
+	}
+
+	// display initialized banner
+	log.Info().
+		Str("version", fmt.Sprintf("%s (%s@%s)", Version, GitCommit, Timestamp)).
+		Msg("Initialized")
+
+	errorChannel := make(chan error)
+	for _, h := range c.Host {
+		go func(host string) {
+			addr := host
+			if !strings.Contains(addr, ":") {
+				addr = fmt.Sprintf("%s:%d", host, c.Port)
+			}
+
+			log.Info().Msgf("Starting server on %s", addr)
+			if err := http.ListenAndServe(addr, router); err != nil {
+				if err != nil {
+					if !errors.Is(err, http.ErrServerClosed) {
+						log.Error().Err(err).Str("addr", addr).Msg("Failed starting web server")
+						errorChannel <- err
+					}
+				}
+			}
+		}(h)
+	}
+
+	go func() {
+		err := proc.Run()
+		if err != nil {
+			errorChannel <- err
+		}
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM)
+
+	select {
+	case sig := <-sigCh:
+		log.Info().Msgf("recieved signal %q, shutting down autoscan..", sig.String())
+
+		if err := store.Close(); err != nil {
+			log.Error().Err(err).Msg("Failed closing datastore")
+		}
+
+	case err := <-errorChannel:
+		log.Error().Err(err).Msg("got unexpected error")
+	}
+
+}
+
+func initTargets(c *config) []autoscan.Target {
+	log.Info().Msg("Initialising targets..")
+
 	targets := make([]autoscan.Target, 0)
 
 	for _, t := range c.Targets.Autoscan {
 		tp, err := ast.New(t)
 		if err != nil {
-			log.Fatal().
-				Err(err).
-				Str("target", "autoscan").
-				Str("target_url", t.URL).
-				Msg("Failed initialising target")
+			log.Warn().Err(err).Str("target", "autoscan").Str("target_url", t.URL).Msg("Failed initialising target")
 		}
 
 		targets = append(targets, tp)
@@ -294,11 +257,7 @@ func main() {
 	for _, t := range c.Targets.Plex {
 		tp, err := plex.New(t)
 		if err != nil {
-			log.Fatal().
-				Err(err).
-				Str("target", "plex").
-				Str("target_url", t.URL).
-				Msg("Failed initialising target")
+			log.Warn().Err(err).Str("target", "plex").Str("target_url", t.URL).Msg("Failed initialising target")
 		}
 
 		targets = append(targets, tp)
@@ -307,11 +266,7 @@ func main() {
 	for _, t := range c.Targets.Emby {
 		tp, err := emby.New(t)
 		if err != nil {
-			log.Fatal().
-				Err(err).
-				Str("target", "emby").
-				Str("target_url", t.URL).
-				Msg("Failed initialising target")
+			log.Warn().Err(err).Str("target", "emby").Str("target_url", t.URL).Msg("Failed initialising target")
 		}
 
 		targets = append(targets, tp)
@@ -320,111 +275,12 @@ func main() {
 	for _, t := range c.Targets.Jellyfin {
 		tp, err := jellyfin.New(t)
 		if err != nil {
-			log.Fatal().
-				Err(err).
-				Str("target", "jellyfin").
-				Str("target_url", t.URL).
-				Msg("Failed initialising target")
+			log.Warn().Err(err).Str("target", "jellyfin").Str("target_url", t.URL).Msg("Failed initialising target")
 		}
 
 		targets = append(targets, tp)
 	}
 
-	log.Info().
-		Int("autoscan", len(c.Targets.Autoscan)).
-		Int("plex", len(c.Targets.Plex)).
-		Int("emby", len(c.Targets.Emby)).
-		Int("jellyfin", len(c.Targets.Jellyfin)).
-		Msg("Initialised targets")
-
-	// scan stats
-	if c.ScanStats.Seconds() > 0 {
-		go scanStats(proc, c.ScanStats)
-	}
-
-	// display initialised banner
-	log.Info().
-		Str("version", fmt.Sprintf("%s (%s@%s)", Version, GitCommit, Timestamp)).
-		Msg("Initialised")
-
-	// processor
-	log.Info().Msg("Processor started")
-
-	targetsAvailable := false
-	targetsSize := len(targets)
-	for {
-		// sleep indefinitely when no targets setup
-		if targetsSize == 0 {
-			log.Warn().Msg("No targets initialised, processor stopped, triggers will continue...")
-			select {}
-		}
-
-		// target availability checker
-		if !targetsAvailable {
-			err = proc.CheckAvailability(targets)
-			switch {
-			case err == nil:
-				targetsAvailable = true
-			case errors.Is(err, autoscan.ErrFatal):
-				log.Error().
-					Err(err).
-					Msg("Fatal error occurred while checking target availability, processor stopped, triggers will continue...")
-
-				// sleep indefinitely
-				select {}
-			default:
-				log.Error().
-					Err(err).
-					Msg("Not all targets are available, retrying in 15 seconds...")
-
-				time.Sleep(15 * time.Second)
-				continue
-			}
-		}
-
-		// process scans
-		err = proc.Process(targets)
-		switch {
-		case err == nil:
-			// Sleep scan-delay between successful requests to reduce the load on targets.
-			time.Sleep(c.ScanDelay)
-
-		case errors.Is(err, autoscan.ErrNoScans):
-			// No scans currently available, let's wait a couple of seconds
-			log.Trace().
-				Msg("No scans are available, retrying in 15 seconds...")
-
-			time.Sleep(15 * time.Second)
-
-		case errors.Is(err, autoscan.ErrAnchorUnavailable):
-			log.Error().
-				Err(err).
-				Msg("Not all anchor files are available, retrying in 15 seconds...")
-
-			time.Sleep(15 * time.Second)
-
-		case errors.Is(err, autoscan.ErrTargetUnavailable):
-			targetsAvailable = false
-			log.Error().
-				Err(err).
-				Msg("Not all targets are available, retrying in 15 seconds...")
-
-			time.Sleep(15 * time.Second)
-
-		case errors.Is(err, autoscan.ErrFatal):
-			// fatal error occurred, processor must stop (however, triggers must not)
-			log.Error().
-				Err(err).
-				Msg("Fatal error occurred while processing targets, processor stopped, triggers will continue...")
-
-			// sleep indefinitely
-			select {}
-
-		default:
-			// unexpected error
-			log.Fatal().
-				Err(err).
-				Msg("Failed processing targets")
-		}
-	}
+	log.Info().Int("autoscan", len(c.Targets.Autoscan)).Int("plex", len(c.Targets.Plex)).Int("emby", len(c.Targets.Emby)).Int("jellyfin", len(c.Targets.Jellyfin)).Msg("Initialised targets")
+	return targets
 }

@@ -1,7 +1,10 @@
 package autoscan
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"net/url"
 	"path"
 	"strings"
@@ -22,4 +25,13 @@ func DSN(path string, q url.Values) string {
 	}
 
 	return u.String()
+}
+
+func CreateMd5Hash(text string) string {
+	hasher := md5.New()
+	_, err := io.WriteString(hasher, text)
+	if err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(hasher.Sum(nil))
 }

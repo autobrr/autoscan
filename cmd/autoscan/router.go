@@ -23,13 +23,13 @@ func pattern(name string) string {
 	return fmt.Sprintf("/%s", name)
 }
 
-func createCredentials(c config) map[string]string {
+func createCredentials(c *config) map[string]string {
 	creds := make(map[string]string)
 	creds[c.Auth.Username] = c.Auth.Password
 	return creds
 }
 
-func getRouter(c config, proc *processor.Processor) chi.Router {
+func getRouter(c *config, proc *processor.Processor) chi.Router {
 	r := chi.NewRouter()
 
 	// Middleware

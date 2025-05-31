@@ -1,6 +1,7 @@
 package autoscan
 
 import (
+	"context"
 	"github.com/rs/zerolog"
 
 	"github.com/autobrr/autoscan"
@@ -15,13 +16,18 @@ type Config struct {
 }
 
 type target struct {
+	id   string
 	url  string
 	user string
 	pass string
 
 	log     zerolog.Logger
 	rewrite autoscan.Rewriter
-	api     apiClient
+	api     *apiClient
+}
+
+func (t target) ID() string {
+	return t.id
 }
 
 func New(c Config) (autoscan.Target, error) {
@@ -35,6 +41,7 @@ func New(c Config) (autoscan.Target, error) {
 	}
 
 	return &target{
+		id:   autoscan.CreateMd5Hash(c.URL + c.User + c.Pass),
 		url:  c.URL,
 		user: c.User,
 		pass: c.Pass,
@@ -45,7 +52,7 @@ func New(c Config) (autoscan.Target, error) {
 	}, nil
 }
 
-func (t target) Scan(scan autoscan.Scan) error {
+func (t target) Scan(ctx context.Context, scan autoscan.Scan) error {
 	scanFolder := t.rewrite(scan.Folder)
 
 	// send scan request
@@ -55,7 +62,7 @@ func (t target) Scan(scan autoscan.Scan) error {
 
 	l.Trace().Msg("Sending scan request")
 
-	if err := t.api.Scan(scanFolder); err != nil {
+	if err := t.api.Scan(ctx, scanFolder); err != nil {
 		return err
 	}
 
@@ -63,6 +70,6 @@ func (t target) Scan(scan autoscan.Scan) error {
 	return nil
 }
 
-func (t target) Available() error {
-	return t.api.Available()
+func (t target) Available(ctx context.Context) error {
+	return t.api.Available(ctx)
 }

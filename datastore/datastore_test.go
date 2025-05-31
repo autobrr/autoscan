@@ -1,45 +1,32 @@
-package processor
+package datastore
 
 import (
-	"database/sql"
 	"errors"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/autobrr/autoscan"
-	"github.com/autobrr/autoscan/migrate"
-
 	// sqlite3 driver
 	_ "modernc.org/sqlite"
 )
 
 const sqlGetScan = `
-SELECT folder, priority, time FROM scan
+SELECT folder, priority, target_id, time FROM scan
 WHERE folder = ?
 `
 
-func (store *datastore) GetScan(folder string) (autoscan.Scan, error) {
-	row := store.QueryRow(sqlGetScan, folder)
+func (store *Datastore) GetScan(folder string) (autoscan.Scan, error) {
+	row := store.db.QueryRow(sqlGetScan, folder)
 
 	scan := autoscan.Scan{}
-	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time)
+	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Target, &scan.Time)
 
 	return scan, err
 }
 
-func getDatastore(t *testing.T) *datastore {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	mg, err := migrate.New(db, "migrations")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ds, err := newDatastore(db, mg)
+func getDatastore(t *testing.T) *Datastore {
+	ds, err := NewDatastore(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,12 +48,14 @@ func TestUpsert(t *testing.T) {
 				{
 					Folder:   "testfolder/test",
 					Priority: 5,
+					Target:   "sonarr",
 					Time:     time.Time{}.Add(1),
 				},
 			},
 			WantScan: autoscan.Scan{
 				Folder:   "testfolder/test",
 				Priority: 5,
+				Target:   "sonarr",
 				Time:     time.Time{}.Add(1),
 			},
 		},

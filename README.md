@@ -3,6 +3,8 @@ As all three projects have permissible open source licenses, feel free to start 
 
 # Autoscan
 
+This is a fork of [Cloudbox/Autoscan](https://github.com/cloudbox/autoscan)
+
 Autoscan replaces the default Plex and Emby behaviour for picking up file changes on the file system.
 Autoscan integrates with Sonarr, Radarr, Readarr, Lidarr and Google Drive to fetch changes in near real-time without relying on the file system.
 
@@ -24,7 +26,7 @@ Autoscan also improves upon [Plex Autoscan](https://github.com/l3uddz/plex_autos
 
 ## Installing autoscan
 
-Autoscan offers [pre-compiled binaries](https://github.com/Cloudbox/autoscan/releases/latest) for both Linux and MacOS for each official release. In addition, we also offer a [Docker image](#docker)!
+Autoscan offers [pre-compiled binaries](https://github.com/autobrr/autoscan/releases/latest) for both Linux and MacOS for each official release. In addition, we also offer a [Docker image](#docker)!
 
 Alternatively, you can build the Autoscan binary yourself.
 To build the autoscan CLI on your system, make sure:

@@ -7,177 +7,196 @@ on:
     tags:
       - 'v*'
   pull_request:
-    branches:
-      - master
+
+env:
+  REGISTRY: ghcr.io
+  REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
+  GO_VERSION: '1.24'
+
+permissions:
+  contents: write
+  packages: write
 
 jobs:
-  build:
+  test:
+    name: Test
     runs-on: ubuntu-latest
     steps:
-      # dependencies
-      - name: goreleaser
-        uses: goreleaser/goreleaser-action@v3
-        with:
-          install-only: true
-          version: 1.7.0
-
-      - name: goreleaser info
-        run: goreleaser -v
-
-      - name: task
-        uses: arduino/setup-task@v1
-
-      - name: task info
-        run: task --version
-
-      - name: qemu
-        if: github.event.pull_request.head.repo.fork == false
-        uses: docker/setup-qemu-action@v2
-
-      - name: buildx
-        if: github.event.pull_request.head.repo.fork == false
-        uses: docker/setup-buildx-action@v2
-
-      # checkout
-      - name: checkout
-        uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # setup go
-      - name: go
-        uses: actions/setup-go@v3
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          go-version: 1.19
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
 
-      - name: go info
-        run: |
-          go version
-          go env
+      - name: Test
+        run: go run gotest.tools/gotestsum@latest --junitfile unit-tests.xml --format pkgname -- ./...
 
-      # cache
-      - name: cache-go
-        uses: actions/cache@v3
+      - name: Test Summary
+        uses: test-summary/action@v2
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-cache-mod
+          paths: "unit-tests.xml"
+        if: always()
 
-      - name: cache-task
-        uses: actions/cache@v3
+  goreleaserbuild:
+    name: Build binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          path: .task/**/*
-          key: ${{ runner.os }}-go-task
+          fetch-depth: 0
 
-      # vendor
-      - name: vendor
-        run: |
-          task vendor
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
 
-      # test
-      - name: tests
-        run: |
-          task test
-
-      # git status
-      - name: git status
-        run: git status
-
-      # build
-      - name: build
-        if: startsWith(github.ref, 'refs/tags/') == false
-        run: |
-          task snapshot
-
-      # publish
-      - name: publish
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Run GoReleaser build
+        if: github.event_name == 'pull_request'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser-pro
+          # version: "~> v2"
+          version: "nightly"
+          args: release --clean --skip=validate,publish --parallelism 5 --snapshot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REF: ${{ github.ref }}
-        run: |
-          task publish
+          GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
 
-      # artifacts
-      - name: artifact_linux
-        uses: actions/upload-artifact@v3
+      - name: Run GoReleaser build and publish tags
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: goreleaser/goreleaser-action@v6
         with:
-          name: build_linux
-          path: dist/*linux*
-
-      - name: artifact_darwin
-        uses: actions/upload-artifact@v3
-        with:
-          name: build_darwin
-          path: dist/*darwin*
-
-      # docker login
-      - name: docker login
-        if: github.event.pull_request.head.repo.fork == false
+          distribution: goreleaser-pro
+          # version: "~> v2"
+          version: "nightly"
+          args: release --clean --parallelism 5
         env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-        run: |
-          echo "${DOCKER_PASSWORD}" | docker login --username "${DOCKER_USERNAME}" --password-stdin
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
 
-      # docker build (latest & tag)
-      - name: release tag
-        if: startsWith(github.ref, 'refs/tags/') == true && github.event.pull_request.head.repo.fork == false
-        uses: little-core-labs/get-git-tag@v3.0.2
-        id: releasetag
+  docker:
+    name: Build Docker images
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        platform:
+          - linux/386
+          - linux/amd64
+          - linux/amd64/v2
+          - linux/amd64/v3
+          - linux/arm/v6
+          - linux/arm/v7
+          - linux/arm64
+          - linux/ppc64le
+          - linux/s390x
+    needs: [ test ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          tagRegex: "v?(.+)"
+          fetch-depth: 0
 
-      - name: docker - build release
-        if: startsWith(github.ref, 'refs/tags/') == true && github.event.pull_request.head.repo.fork == false
-        uses: docker/build-push-action@v3
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=semver,pattern={{raw}}
+            type=ref,event=branch
+            type=ref,event=pr
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Supported Architectures
+        run: docker buildx ls
+
+      - name: Build and publish image
+        id: docker_build
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./docker/Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
-          pull: true
-          push: true
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=${{ (github.event.pull_request.head.repo.full_name == 'autobrr/autoscan' || github.event_name != 'pull_request') && 'true' || 'false' }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILDTIME=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+            VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
+            REVISION=${{ github.event.pull_request.head.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: |
-            cloudb0x/autoscan:${{ steps.releasetag.outputs.tag }}
-            cloudb0x/autoscan:latest
 
-      # docker build (branch)
-      - name: branch name
-        if: startsWith(github.ref, 'refs/tags/') == false && github.event.pull_request.head.repo.fork == false
-        id: branch-name
-        uses: tj-actions/branch-names@v6.2
-
-      - name: docker tag
-        if: startsWith(github.ref, 'refs/tags/') == false && github.event.pull_request.head.repo.fork == false
-        uses: frabert/replace-string-action@v2.3
-        id: dockertag
-        with:
-          pattern: '[:\.\/]+'
-          string: "${{ steps.branch-name.outputs.current_branch }}"
-          replace-with: '-'
-          flags: 'g'
-
-      - name: docker - build branch
-        if: startsWith(github.ref, 'refs/tags/') == false && github.event.pull_request.head.repo.fork == false
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: ./docker/Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
-          pull: true
-          push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          tags: |
-            cloudb0x/autoscan:${{ steps.dockertag.outputs.replaced }}
-
-      # cleanup
-      - name: cleanup
-        if: github.event.pull_request.head.repo.fork == false
+      - name: Export digest
+        id: digest-prep
         run: |
-          rm -f ${HOME}/.docker/config.json
+          mkdir -p /tmp/digests
+          digest="${{ steps.docker_build.outputs.digest }}"
+          echo "manifest-hash=${digest#sha256:}" >> "$GITHUB_OUTPUT"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-digests-${{ steps.digest-prep.outputs.manifest-hash }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-merge:
+    name: Publish Docker multi-arch manifest
+    if: ${{ github.event.pull_request.head.repo.full_name == 'autobrr/autoscan' || github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    needs: [ docker, test ]
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: docker-digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}

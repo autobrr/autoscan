@@ -1,4 +1,4 @@
-FROM sc4h/alpine-s6overlay:v2-3.15
+FROM sc4h/alpine-s6overlay:v2-3.21
 
 ARG TARGETOS
 ARG TARGETARCH

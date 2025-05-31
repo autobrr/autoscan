@@ -56,6 +56,7 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Westworld/Season 1",
 						Priority: 5,
+						Target:   "sonarr",
 						Time:     currentTime,
 					},
 				},
@@ -73,6 +74,7 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Westworld/Season 2",
 						Priority: 5,
+						Target:   "sonarr",
 						Time:     currentTime,
 					},
 				},
@@ -90,21 +92,25 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Westworld/Season 1",
 						Priority: 5,
+						Target:   "sonarr",
 						Time:     currentTime,
 					},
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Westworld [imdb:tt0475784]/Season 1",
 						Priority: 5,
+						Target:   "sonarr",
 						Time:     currentTime,
 					},
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Westworld/Season 2",
 						Priority: 5,
+						Target:   "sonarr",
 						Time:     currentTime,
 					},
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Westworld [imdb:tt0475784]/Season 2",
 						Priority: 5,
+						Target:   "sonarr",
 						Time:     currentTime,
 					},
 				},
@@ -122,6 +128,7 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Westworld",
 						Priority: 5,
+						Target:   "sonarr",
 						Time:     currentTime,
 					},
 				},

@@ -1,9 +1,10 @@
 # https://goreleaser.com
+version: 2
 project_name: autoscan
 
 # Build
 builds:
-  -
+  - id: autoscan
     env:
       - CGO_ENABLED=0
     goos:
@@ -11,6 +12,7 @@ builds:
       - darwin
       - freebsd
     main: ./cmd/autoscan
+    binary: autoscan
     goarch:
       - amd64
       - arm64
@@ -39,21 +41,30 @@ universal_binaries:
 archives:
   -
     name_template: "{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
-    format: "binary"
 
 # Checksum
 checksum:
-  name_template: "checksums.txt"
-  algorithm: sha512
+  name_template: '{{ .ProjectName }}_{{ .Version }}_checksums.txt'
 
 # Snapshot
 snapshot:
-  name_template: "{{ .Major }}.{{ .Minor }}.{{ .Patch }}-dev+{{ .Branch  }}"
+  version_template: "{{ .Major }}.{{ .Minor }}.{{ .Patch }}-dev+{{ .Branch  }}"
 
 # Changelog
 changelog:
+  sort: asc
+  use: github
   filters:
     exclude:
-      - "^docs:"
-      - "^test:"
-      - "^Merge branch"
+      - Merge pull request
+      - Merge remote-tracking branch
+      - Merge branch
+  groups:
+    - title: 'New Features'
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: 'Bug fixes'
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 10
+    - title: Other work
+      order: 999
