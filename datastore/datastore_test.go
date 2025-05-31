@@ -12,7 +12,7 @@ import (
 )
 
 const sqlGetScan = `
-SELECT folder, priority, time FROM scan
+SELECT folder, priority, target_id, time FROM scan
 WHERE folder = ?
 `
 
@@ -20,7 +20,7 @@ func (store *Datastore) GetScan(folder string) (autoscan.Scan, error) {
 	row := store.db.QueryRow(sqlGetScan, folder)
 
 	scan := autoscan.Scan{}
-	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time)
+	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Target, &scan.Time)
 
 	return scan, err
 }
@@ -48,12 +48,14 @@ func TestUpsert(t *testing.T) {
 				{
 					Folder:   "testfolder/test",
 					Priority: 5,
+					Target:   "sonarr",
 					Time:     time.Time{}.Add(1),
 				},
 			},
 			WantScan: autoscan.Scan{
 				Folder:   "testfolder/test",
 				Priority: 5,
+				Target:   "sonarr",
 				Time:     time.Time{}.Add(1),
 			},
 		},

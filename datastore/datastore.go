@@ -192,7 +192,7 @@ func (store *Datastore) GetAll() (scans []autoscan.Scan, err error) {
 	defer rows.Close()
 	for rows.Next() {
 		scan := autoscan.Scan{}
-		err = rows.Scan(&scan.Folder, &scan.Priority, &scan.Time)
+		err = rows.Scan(&scan.Folder, &scan.Priority, &scan.Target, &scan.Time)
 		if err != nil {
 			return scans, err
 		}
