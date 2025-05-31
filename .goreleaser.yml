@@ -41,7 +41,6 @@ universal_binaries:
 archives:
   -
     name_template: "{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
-    format: "binary"
 
 # Checksum
 checksum:
@@ -49,7 +48,7 @@ checksum:
 
 # Snapshot
 snapshot:
-  name_template: "{{ .Major }}.{{ .Minor }}.{{ .Patch }}-dev+{{ .Branch  }}"
+  version_template: "{{ .Major }}.{{ .Minor }}.{{ .Patch }}-dev+{{ .Branch  }}"
 
 # Changelog
 changelog:
