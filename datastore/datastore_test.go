@@ -1,15 +1,12 @@
-package processor
+package datastore
 
 import (
-	"database/sql"
 	"errors"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/autobrr/autoscan"
-	"github.com/autobrr/autoscan/migrate"
-
 	// sqlite3 driver
 	_ "modernc.org/sqlite"
 )
@@ -19,8 +16,8 @@ SELECT folder, priority, time FROM scan
 WHERE folder = ?
 `
 
-func (store *datastore) GetScan(folder string) (autoscan.Scan, error) {
-	row := store.QueryRow(sqlGetScan, folder)
+func (store *Datastore) GetScan(folder string) (autoscan.Scan, error) {
+	row := store.db.QueryRow(sqlGetScan, folder)
 
 	scan := autoscan.Scan{}
 	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time)
@@ -28,18 +25,8 @@ func (store *datastore) GetScan(folder string) (autoscan.Scan, error) {
 	return scan, err
 }
 
-func getDatastore(t *testing.T) *datastore {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	mg, err := migrate.New(db, "migrations")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ds, err := newDatastore(db, mg)
+func getDatastore(t *testing.T) *Datastore {
+	ds, err := NewDatastore(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

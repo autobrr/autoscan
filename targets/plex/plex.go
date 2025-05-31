@@ -1,9 +1,11 @@
 package plex
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -17,7 +19,8 @@ type Config struct {
 	Verbosity string             `yaml:"verbosity"`
 }
 
-type target struct {
+type Target struct {
+	id        string
 	url       string
 	token     string
 	libraries []library
@@ -25,9 +28,15 @@ type target struct {
 	log     zerolog.Logger
 	rewrite autoscan.Rewriter
 	api     *apiClient
+
+	healthy bool
 }
 
-func New(c Config) (autoscan.Target, error) {
+func (t *Target) ID() string {
+	return t.id
+}
+
+func New(c Config) (*Target, error) {
 	l := autoscan.GetLogger(c.Verbosity).With().
 		Str("target", "plex").
 		Str("url", c.URL).Logger()
@@ -39,50 +48,117 @@ func New(c Config) (autoscan.Target, error) {
 
 	api := newAPIClient(c.URL, c.Token, l)
 
-	version, err := api.Version()
-	if err != nil {
-		return nil, err
+	t := &Target{
+		id:        autoscan.CreateMd5Hash(c.URL + c.Token),
+		url:       c.URL,
+		token:     c.Token,
+		libraries: make([]library, 0),
+
+		log:     l,
+		rewrite: rewriter,
+		api:     api,
+		healthy: false,
 	}
 
+	ctx := context.Background()
+	version, err := api.Version(ctx)
+	if err != nil {
+		t.healthy = false
+		l.Warn().
+			Err(err).
+			Msg("Plex not available")
+		return t, autoscan.ErrTargetUnavailable
+	}
+
+	t.healthy = true
 	l.Debug().Msgf("Plex version: %s", version)
 	if !isSupportedVersion(version) {
 		return nil, fmt.Errorf("plex running unsupported version %s: %w", version, autoscan.ErrFatal)
 	}
 
-	libraries, err := api.Libraries()
+	libraries, err := t.api.Libraries(ctx)
 	if err != nil {
 		return nil, err
 	}
+	t.libraries = libraries
 
 	l.Debug().
 		Interface("libraries", libraries).
 		Msg("Retrieved libraries")
 
-	return &target{
-		url:       c.URL,
-		token:     c.Token,
-		libraries: libraries,
-
-		log:     l,
-		rewrite: rewriter,
-		api:     api,
-	}, nil
+	return t, nil
 }
 
-func (t target) Available() error {
-	_, err := t.api.Version()
-	return err
+// startLibraryFetcher starts a background goroutine that periodically fetches libraries
+func (t *Target) startLibraryFetcher(ctx context.Context, fetchInterval time.Duration) {
+	t.log.Debug().Msgf("Starting library fetcher with interval: %v", fetchInterval)
+
+	ticker := time.NewTicker(fetchInterval)
+
+	go func() {
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				t.log.Debug().Msg("Fetching libraries")
+				libraries, err := t.api.Libraries(ctx)
+				if err != nil {
+					t.log.Error().Err(err).Msg("Failed to fetch libraries")
+					continue
+				}
+
+				t.libraries = libraries
+				t.log.Debug().
+					Interface("libraries", libraries).
+					Msg("Libraries refreshed")
+			case <-ctx.Done():
+				t.log.Debug().Msg("Library fetcher stopped")
+				return
+			}
+		}
+	}()
 }
 
-func (t target) Scan(scan autoscan.Scan) error {
-	// determine library for this scan
+func (t *Target) IsHealthy(ctx context.Context) (bool, error) {
+	_, err := t.api.Version(ctx)
+	if err != nil {
+		t.healthy = false
+		return false, err
+	}
+	t.healthy = true
+	return t.healthy, nil
+}
+
+func (t *Target) Available(ctx context.Context) error {
+	if _, err := t.api.Version(ctx); err != nil {
+		return err
+	}
+
+	if len(t.libraries) == 0 {
+		libraries, err := t.api.Libraries(ctx)
+		if err != nil {
+			return err
+		}
+		t.libraries = libraries
+
+		t.log.Debug().
+			Interface("libraries", libraries).
+			Msg("Retrieved libraries")
+	}
+
+	return nil
+}
+
+func (t *Target) Scan(ctx context.Context, scan autoscan.Scan) error {
+	// determine a library for this scan
 	scanFolder := t.rewrite(scan.Folder)
 
 	libs, err := t.getScanLibrary(scanFolder)
 	if err != nil {
 		t.log.Warn().
 			Err(err).
-			Msg("No target libraries found")
+			Msg("No Target libraries found")
 
 		return nil
 	}
@@ -96,7 +172,7 @@ func (t target) Scan(scan autoscan.Scan) error {
 
 		l.Trace().Msg("Sending scan request")
 
-		if err := t.api.Scan(scanFolder, lib.ID); err != nil {
+		if err := t.api.Scan(ctx, scanFolder, lib.ID); err != nil {
 			return err
 		}
 
@@ -106,7 +182,7 @@ func (t target) Scan(scan autoscan.Scan) error {
 	return nil
 }
 
-func (t target) getScanLibrary(folder string) ([]library, error) {
+func (t *Target) getScanLibrary(folder string) ([]library, error) {
 	libraries := make([]library, 0)
 
 	for _, l := range t.libraries {

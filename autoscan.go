@@ -1,6 +1,7 @@
 package autoscan
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 //
 // The Scan is used across Triggers, Targets and the Processor.
 type Scan struct {
+	Target   string
 	Folder   string
 	Priority int
 	Time     time.Time
@@ -31,8 +33,9 @@ type HTTPTrigger func(ProcessorFunc) http.Handler
 // A Target receives a Scan from the Processor and translates the Scan
 // into a format understood by the target.
 type Target interface {
-	Scan(Scan) error
-	Available() error
+	Scan(ctx context.Context, scan Scan) error
+	Available(ctx context.Context) error
+	ID() string
 }
 
 var (
@@ -40,6 +43,11 @@ var (
 	// or suffers from fatal errors. In this case, the processor
 	// will halt operations until the target is back online.
 	ErrTargetUnavailable = errors.New("target unavailable")
+
+	// ErrAllTargetsUnavailable may occur when a Target goes offline
+	// or suffers from fatal errors. In this case, the processor
+	// will halt operations until the target is back online.
+	ErrAllTargetsUnavailable = errors.New("all targets unavailable")
 
 	// ErrFatal indicates a severe problem related to development.
 	ErrFatal = errors.New("fatal error")

@@ -2,6 +2,7 @@ package jellyfin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,8 +19,8 @@ type apiClient struct {
 	token   string
 }
 
-func newAPIClient(baseURL string, token string, log zerolog.Logger) apiClient {
-	return apiClient{
+func newAPIClient(baseURL string, token string, log zerolog.Logger) *apiClient {
+	return &apiClient{
 		client:  &http.Client{},
 		log:     log,
 		baseURL: baseURL,
@@ -27,8 +28,10 @@ func newAPIClient(baseURL string, token string, log zerolog.Logger) apiClient {
 	}
 }
 
-func (c apiClient) do(req *http.Request) (*http.Response, error) {
-	req.Header.Set("X-Emby-Token", c.token)
+func (c *apiClient) do(req *http.Request) (*http.Response, error) {
+	// TODO remove old deprecated auth header
+	//req.Header.Set("X-Emby-Token", c.token)
+	req.Header.Set("Authorization", fmt.Sprintf("MediaBrowser Token=\"%s\"", c.token))
 	req.Header.Set("Accept", "application/json") // Force JSON Response.
 
 	res, err := c.client.Do(req)
@@ -58,10 +61,10 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 	}
 }
 
-func (c apiClient) Available() error {
+func (c *apiClient) Available(ctx context.Context) error {
 	// create request
 	reqURL := autoscan.JoinURL(c.baseURL, "System", "Info")
-	req, err := http.NewRequest("GET", reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed creating availability request: %v: %w", err, autoscan.ErrFatal)
 	}
@@ -81,10 +84,10 @@ type library struct {
 	Path string
 }
 
-func (c apiClient) Libraries() ([]library, error) {
+func (c *apiClient) Libraries(ctx context.Context) ([]library, error) {
 	// create request
 	reqURL := autoscan.JoinURL(c.baseURL, "Library", "VirtualFolders")
-	req, err := http.NewRequest("GET", reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed creating libraries request: %v: %w", err, autoscan.ErrFatal)
 	}
@@ -134,7 +137,7 @@ type scanRequest struct {
 	UpdateType string `json:"updateType"`
 }
 
-func (c apiClient) Scan(path string) error {
+func (c *apiClient) Scan(ctx context.Context, path string) error {
 	// create request payload
 	type Payload struct {
 		Updates []scanRequest `json:"Updates"`
@@ -156,7 +159,7 @@ func (c apiClient) Scan(path string) error {
 
 	// create request
 	reqURL := autoscan.JoinURL(c.baseURL, "Library", "Media", "Updated")
-	req, err := http.NewRequest("POST", reqURL, bytes.NewBuffer(b))
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewBuffer(b))
 	if err != nil {
 		return fmt.Errorf("failed creating scan request: %v: %w", err, autoscan.ErrFatal)
 	}

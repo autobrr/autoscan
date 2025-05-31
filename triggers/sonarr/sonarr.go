@@ -28,6 +28,7 @@ func New(c Config) (autoscan.HTTPTrigger, error) {
 
 	trigger := func(callback autoscan.ProcessorFunc) http.Handler {
 		return handler{
+			name:     c.Name,
 			callback: callback,
 			priority: c.Priority,
 			rewrite:  rewriter,
@@ -38,6 +39,7 @@ func New(c Config) (autoscan.HTTPTrigger, error) {
 }
 
 type handler struct {
+	name     string
 	priority int
 	rewrite  autoscan.Rewriter
 	callback autoscan.ProcessorFunc
@@ -145,6 +147,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		scan := autoscan.Scan{
 			Folder:   folderPath,
 			Priority: h.priority,
+			Target:   h.name,
 			Time:     now(),
 		}
 

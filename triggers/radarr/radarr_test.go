@@ -56,6 +56,7 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Interstellar (2014)",
 						Priority: 5,
+						Target:   "radarr",
 						Time:     currentTime,
 					},
 				},
@@ -73,6 +74,7 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Tenet (2020)",
 						Priority: 5,
+						Target:   "radarr",
 						Time:     currentTime,
 					},
 				},
@@ -90,6 +92,7 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Wonder Woman 1984 (2020)",
 						Priority: 5,
+						Target:   "radarr",
 						Time:     currentTime,
 					},
 				},
@@ -107,6 +110,7 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Deadpool (2016)",
 						Priority: 5,
+						Target:   "radarr",
 						Time:     currentTime,
 					},
 				},

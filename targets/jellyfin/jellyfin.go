@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -16,17 +17,22 @@ type Config struct {
 	Verbosity string             `yaml:"verbosity"`
 }
 
-type target struct {
+type Target struct {
+	id        string
 	url       string
 	token     string
 	libraries []library
 
 	log     zerolog.Logger
 	rewrite autoscan.Rewriter
-	api     apiClient
+	api     *apiClient
 }
 
-func New(c Config) (autoscan.Target, error) {
+func (t *Target) ID() string {
+	return t.id
+}
+
+func New(c Config) (*Target, error) {
 	l := autoscan.GetLogger(c.Verbosity).With().
 		Str("target", "jellyfin").
 		Str("url", c.URL).
@@ -39,32 +45,58 @@ func New(c Config) (autoscan.Target, error) {
 
 	api := newAPIClient(c.URL, c.Token, l)
 
-	libraries, err := api.Libraries()
+	t := &Target{
+		id:        autoscan.CreateMd5Hash(c.URL + c.Token),
+		url:       c.URL,
+		token:     c.Token,
+		libraries: make([]library, 0),
+
+		log:     l,
+		rewrite: rewriter,
+		api:     api,
+	}
+
+	ctx := context.Background()
+	if err := api.Available(ctx); err != nil {
+		l.Warn().Err(err).Msg("Jellyfin not available")
+		return t, autoscan.ErrTargetUnavailable
+	}
+
+	libraries, err := api.Libraries(ctx)
 	if err != nil {
 		return nil, err
 	}
+	t.libraries = libraries
 
 	l.Debug().
 		Interface("libraries", libraries).
 		Msg("Retrieved libraries")
 
-	return &target{
-		url:       c.URL,
-		token:     c.Token,
-		libraries: libraries,
-
-		log:     l,
-		rewrite: rewriter,
-		api:     api,
-	}, nil
+	return t, nil
 }
 
-func (t target) Available() error {
-	return t.api.Available()
+func (t *Target) Available(ctx context.Context) error {
+	if err := t.api.Available(ctx); err != nil {
+		return err
+	}
+
+	if len(t.libraries) == 0 {
+		libraries, err := t.api.Libraries(ctx)
+		if err != nil {
+			return err
+		}
+		t.libraries = libraries
+
+		t.log.Debug().
+			Interface("libraries", libraries).
+			Msg("Retrieved libraries")
+	}
+
+	return nil
 }
 
-func (t target) Scan(scan autoscan.Scan) error {
-	// determine library for this scan
+func (t *Target) Scan(ctx context.Context, scan autoscan.Scan) error {
+	// determine a library for this scan
 	scanFolder := t.rewrite(scan.Folder)
 
 	lib, err := t.getScanLibrary(scanFolder)
@@ -84,7 +116,7 @@ func (t target) Scan(scan autoscan.Scan) error {
 	// send scan request
 	l.Trace().Msg("Sending scan request")
 
-	if err := t.api.Scan(scanFolder); err != nil {
+	if err := t.api.Scan(ctx, scanFolder); err != nil {
 		return err
 	}
 
@@ -92,7 +124,7 @@ func (t target) Scan(scan autoscan.Scan) error {
 	return nil
 }
 
-func (t target) getScanLibrary(folder string) (*library, error) {
+func (t *Target) getScanLibrary(folder string) (*library, error) {
 	for _, l := range t.libraries {
 		if strings.HasPrefix(folder, l.Path) {
 			return &l, nil

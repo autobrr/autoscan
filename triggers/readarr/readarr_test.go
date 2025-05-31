@@ -55,6 +55,7 @@ func TestHandler(t *testing.T) {
 				Scans: []autoscan.Scan{{
 					Folder:   "/mnt/unionfs/Media/Books/Brandon Sanderson/The Way of Kings (2010)",
 					Priority: 5,
+					Target:   "readarr",
 					Time:     currentTime,
 				}},
 			},
